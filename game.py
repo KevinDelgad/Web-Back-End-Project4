@@ -3,7 +3,12 @@ import sqlite3
 import uuid
 import databases
 import toml
+import json
 import itertools
+import requests
+import httpx
+import os
+import socket
 from quart import Quart, abort, g, request
 from quart_schema import QuartSchema, validate_request
 
@@ -17,11 +22,19 @@ app.config.from_file(f"./etc/{__name__}.toml", toml.load)
 class Game:
     username: str
 
+@dataclasses.dataclass
+class Url:
+    url: str
 
 @dataclasses.dataclass
 class Guess:
     gameid: str
     word: str
+
+@dataclasses.dataclass
+class Information:
+    user: str
+    attempts: int
 
 database_list = ['DATABASE_PRIMARY','DATABASE_SECONDARY1','DATABASE_SECONDARY2']
 database_index = itertools.cycle(database_list)
@@ -133,6 +146,14 @@ async def add_guess(data):
             except sqlite3.IntegrityError as e:
                 abort(404, e)
 
+            numguesses = await db.fetch_one(
+                "SELECT guesses FROM game WHERE gameid = :gameid",
+                values={"gameid":currGame["gameid"]}
+            )
+            data = {'user' : auth.username, 'attempts' : numguesses[0]}
+            print(data)
+            r = httpx.post("http://tuffix-vm/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
+
             return {
                 "guessedWord": currGame["word"],
                 "Accuracy": "\u2713" * 5,
@@ -208,6 +229,14 @@ async def add_guess(data):
                         """,
                         values={"status": "Finished", "gameid": currGame["gameid"]},
                     )
+                    numguesses = await db.fetch_one(
+                        "SELECT guesses FROM game WHERE gameid = :gameid",
+                        values={"gameid":currGame["gameid"]}
+                    )                   
+                    data = {'user' : auth.username, 'attempts' : numguesses[0]}
+                    r = httpx.post("http://tuffix-vm/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
+                    print(data)
+
                     return "Max attempts.", 202
             except sqlite3.IntegrityError as e:
                 abort(404, e)
@@ -276,6 +305,42 @@ async def my_game():
             {"WWW-Authenticate": 'Basic realm = "Login required"'},
         )
 
+@app.route("/subscribe", methods=["POST"])
+@validate_request(Url)
+async def register(data):
+    auth = request.authorization
+    db = await _get_db_primary()
+    url = dataclasses.asdict(data)
+    print(url.get('url'))
+    username = auth.username
+    await db.execute("INSERT INTO callbackurls(username, url) VALUES(:username, :url)", values={"username":auth.username,"url":url.get('url')})
+    # checkdb = await db.fetch_one(
+    #     "SELECT username FROM callbackurls where username = :username",
+    #     values={"username":username},
+    # )
+    # envar = os.environ
+    # print(envar['HOSTNAME'])
+    # fqdn = socket.getfqdn(envar['HOSTNAME'])
+    # print(fqdn)
+    # leaderboardURL = 'http://'+fqdn+':5400/results'
+    # print(leaderboardURL)
+
+    return "",200
+
+@app.route("/payload", methods=["POST"])
+async def inspect_push():
+    db = await _get_db()
+    push = await request.get_json()
+    app.logger.info(json.dumps(push, indent=2))
+    data = push
+    allurls = await db.fetch_all("SELECT url from callbackurls")
+    for urls in allurls:
+        try:
+            r = httpx.post(str(urls[0]), data=json.dumps(data), headers={'Content-Type': 'application/json'})
+        except:
+            print("skipped!")
+            continue
+    return "", 204
 
 @app.errorhandler(409)
 def conflict(e):

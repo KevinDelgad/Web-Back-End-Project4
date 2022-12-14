@@ -33,4 +33,9 @@ CREATE TABLE valid_word(
     valid_id INTEGER PRIMARY KEY AUTOINCREMENT,
     valword VARCHAR(5)
 );
+
+CREATE TABLE callbackurls(
+    url STRING Primary Key
+);
+
 COMMIT;
