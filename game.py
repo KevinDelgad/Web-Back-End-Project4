@@ -22,9 +22,9 @@ app.config.from_file(f"./etc/{__name__}.toml", toml.load)
 class Game:
     username: str
 
-@dataclasses.dataclass
-class Url:
-    url: str
+# @dataclasses.dataclass
+# class Url:
+#     url: str
 
 @dataclasses.dataclass
 class Guess:
@@ -152,7 +152,7 @@ async def add_guess(data):
             )
             data = {'user' : auth.username, 'attempts' : numguesses[0]}
             print(data)
-            r = httpx.post("http://tuffix-vm/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
+            r = httpx.post("http://127.0.0.1:5500/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
 
             return {
                 "guessedWord": currGame["word"],
@@ -229,13 +229,6 @@ async def add_guess(data):
                         """,
                         values={"status": "Finished", "gameid": currGame["gameid"]},
                     )
-                    numguesses = await db.fetch_one(
-                        "SELECT guesses FROM game WHERE gameid = :gameid",
-                        values={"gameid":currGame["gameid"]}
-                    )                   
-                    data = {'user' : auth.username, 'attempts' : numguesses[0]}
-                    r = httpx.post("http://tuffix-vm/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
-                    print(data)
 
                     return "Max attempts.", 202
             except sqlite3.IntegrityError as e:
@@ -243,6 +236,15 @@ async def add_guess(data):
         else:
             # should return msg saying invalid word?
             return {"Error": "Invalid Word"}
+        print(guessNum[0])
+        if guessNum[0]+1 == 5:
+            numguesses = await db.fetch_one(
+                "SELECT guesses FROM game WHERE gameid = :gameid",
+                values={"gameid":currGame["gameid"]}
+            )
+            data = {'user' : auth.username, 'attempts' : numguesses[0]}
+            r = httpx.post("http://127.0.0.1:5500/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
+            print(data)
 
         return {"guessedWord": currGame["word"], "Accuracy": accuracy}, 201
     else:
@@ -306,37 +308,32 @@ async def my_game():
         )
 
 @app.route("/subscribe", methods=["POST"])
-@validate_request(Url)
-async def register(data):
-    auth = request.authorization
+async def register():
     db = await _get_db_primary()
-    url = dataclasses.asdict(data)
-    print(url.get('url'))
-    username = auth.username
-    await db.execute("INSERT INTO callbackurls(username, url) VALUES(:username, :url)", values={"username":auth.username,"url":url.get('url')})
-    # checkdb = await db.fetch_one(
-    #     "SELECT username FROM callbackurls where username = :username",
-    #     values={"username":username},
-    # )
-    # envar = os.environ
-    # print(envar['HOSTNAME'])
-    # fqdn = socket.getfqdn(envar['HOSTNAME'])
-    # print(fqdn)
-    # leaderboardURL = 'http://'+fqdn+':5400/results'
-    # print(leaderboardURL)
-
+    push = await request.get_json()
+    app.logger.debug(json.dumps(push, indent=1))
+    await db.execute("DELETE FROM callbackurls where url = :url", values={"url":str(push['url'])})
+    await db.execute("INSERT INTO callbackurls(url) VALUES(:url)", values={"url":str(push['url'])})
+    checkdb = await db.fetch_one(
+        "SELECT url FROM callbackurls where url = :url",
+        values={"url":str(push['url'])},
+    )
+    print("URL: "+checkdb[0])
     return "",200
 
 @app.route("/payload", methods=["POST"])
 async def inspect_push():
+    print("PINGAS")
     db = await _get_db()
     push = await request.get_json()
     app.logger.info(json.dumps(push, indent=2))
     data = push
     allurls = await db.fetch_all("SELECT url from callbackurls")
+    print(allurls)
     for urls in allurls:
         try:
             r = httpx.post(str(urls[0]), data=json.dumps(data), headers={'Content-Type': 'application/json'})
+            print(r)
         except:
             print("skipped!")
             continue

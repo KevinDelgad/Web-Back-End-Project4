@@ -9,3 +9,5 @@ secondary1:./bin/litefs -config ./etc/secondary1.yml
 secondary2:./bin/litefs -config ./etc/secondary2.yml
 
 leaderboard: hypercorn redis_client --reload --debug --bind leaderboard.local.gd:5400 --access-logfile - --error-logfile - --log-level DEBUG
+
+webhook: hypercorn game --reload --debug --bind game.local.gd:$PORT --access-logfile - --error-logfile - --log-level DEBUG
