@@ -11,11 +11,16 @@ import os
 import socket
 from quart import Quart, abort, g, request
 from quart_schema import QuartSchema, validate_request
+from rq import Queue
+import redis
+from redis import Redis
+from redis_worker import worker
 
 app = Quart(__name__)
 QuartSchema(app)
 
 app.config.from_file(f"./etc/{__name__}.toml", toml.load)
+redis_conn = redis.Redis(host='localhost', port=6379, db=0, charset='utf-8', decode_responses=True)
 
 
 @dataclasses.dataclass
@@ -152,7 +157,12 @@ async def add_guess(data):
             )
             data = {'user' : auth.username, 'attempts' : numguesses[0]}
             print(data)
-            r = httpx.post("http://127.0.0.1:5500/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
+
+            q = Queue(connection=redis_conn)
+            workerResult = q.enqueue(worker,({'guesses' : numguesses[0] , 'result' : 'win' , 'username' : auth.username}))
+
+            #r = httpx.post("http://127.0.0.1:5500/payload",data=json.dumps(data), headers={'Content-Type': 'application/json'})
+
 
             return {
                 "guessedWord": currGame["word"],
